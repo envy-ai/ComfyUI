@@ -17,11 +17,11 @@ class HiDreamTokenizer:
 
     def tokenize_with_weights(self, text:str, return_word_ids=False, **kwargs):
         out = {}
-        out["g"] = self.clip_g.tokenize_with_weights(text, return_word_ids)
-        out["l"] = self.clip_l.tokenize_with_weights(text, return_word_ids)
-        t5xxl = self.t5xxl.tokenize_with_weights(text, return_word_ids)
+        out["g"] = self.clip_g.tokenize_with_weights(text, return_word_ids, **kwargs)
+        out["l"] = self.clip_l.tokenize_with_weights(text, return_word_ids, **kwargs)
+        t5xxl = self.t5xxl.tokenize_with_weights(text, return_word_ids, **kwargs)
         out["t5xxl"] = [t5xxl[0]]  # Use only first 128 tokens
-        out["llama"] = self.llama.tokenize_with_weights(text, return_word_ids)
+        out["llama"] = self.llama.tokenize_with_weights(text, return_word_ids, **kwargs)
         return out
 
     def untokenize(self, token_weight_pair):
@@ -98,45 +98,41 @@ class HiDreamTEModel(torch.nn.Module):
 
         if len(token_weight_pairs_g) > 0 or len(token_weight_pairs_l) > 0:
             if self.clip_l is not None:
-                logging.info("Encoding clip_l token weights")
                 lg_out, l_pooled = self.clip_l.encode_token_weights(token_weight_pairs_l)
             else:
                 l_pooled = torch.zeros((1, 768), device=comfy.model_management.intermediate_device())
 
             if self.clip_g is not None:
-                logging.info("Encoding clip_g token weights")
                 g_out, g_pooled = self.clip_g.encode_token_weights(token_weight_pairs_g)
             else:
                 g_pooled = torch.zeros((1, 1280), device=comfy.model_management.intermediate_device())
-                
+
             if self.clip_g is not None and self.clip_l is not None:
                 pooled = torch.cat((l_pooled, g_pooled), dim=-1)            
-
+                
         if self.t5xxl is not None:
-            logging.info("Encoding t5 token weights")
             t5_output = self.t5xxl.encode_token_weights(token_weight_pairs_t5)
             t5_out, t5_pooled = t5_output[:2]
+        else:
+            t5_out = None
 
         if self.llama is not None:
-            logging.info("Encoding llama token weights")
             ll_output = self.llama.encode_token_weights(token_weight_pairs_llama)
             ll_out, ll_pooled = ll_output[:2]
             ll_out = ll_out[:, 1:]
+        else:
+            ll_out = None
 
         if t5_out is None:
-            logging.info("Loading t5_out from disk")
-            t5_path = folder_paths.get_full_path_or_raise("hidream_empty_latents", "t5_out.pt")
+            t5_path = folder_paths.get_full_path_or_raise("hidream_empty_latents", "t5_blank.pt")
             t5_out = torch.load(t5_path, map_location=comfy.model_management.intermediate_device())
 
         if ll_out is None:
-            logging.info("No llama encoder found, filling with zeroes")
             ll_out = torch.zeros((1, 32, 1, 4096), device=comfy.model_management.intermediate_device())
 
-        if pooled is None:            
-            logging.info("Loading pooled from disk")
-            pooled_path = folder_paths.get_full_path_or_raise("hidream_empty_latents", "pooled.pt")
+        if pooled is None:
+            pooled_path = folder_paths.get_full_path_or_raise("hidream_empty_latents", "pooled_blank.pt")
             pooled = torch.load(pooled_path, map_location=comfy.model_management.intermediate_device())
-
 
         extra["conditioning_llama3"] = ll_out
         return t5_out, pooled, extra
