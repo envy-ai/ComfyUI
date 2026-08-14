@@ -130,15 +130,23 @@ def load_torch_file(ckpt, safe_load=False, device=None, return_metadata=False):
                 if not return_metadata:
                     metadata = None
             else:
-                with safetensors.safe_open(ckpt, framework="pt", device=device.type) as f:
-                    sd = {}
-                    for k in f.keys():
-                        tensor = f.get_tensor(k)
-                        if DISABLE_MMAP:  # TODO: Not sure if this is the best way to bypass the mmap issues
-                            tensor = tensor.to(device=device, copy=True)
-                        sd[k] = tensor
+                if DISABLE_MMAP:
+                    # Load the whole safetensors file into system RAM in one pass
+                    # instead of streaming individual tensors from the mmap.
+                    sd = safetensors.torch.load_file(ckpt, device=str(device))
                     if return_metadata:
-                        metadata = f.metadata()
+                        header = safetensors_header(ckpt)
+                        if header is not None:
+                            metadata = json.loads(header.decode("utf-8")).get("__metadata__", {})
+                        else:
+                            metadata = {}
+                else:
+                    with safetensors.safe_open(ckpt, framework="pt", device=device.type) as f:
+                        sd = {}
+                        for k in f.keys():
+                            sd[k] = f.get_tensor(k)
+                        if return_metadata:
+                            metadata = f.metadata()
         except Exception as e:
             if len(e.args) > 0:
                 message = e.args[0]
